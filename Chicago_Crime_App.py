@@ -163,8 +163,7 @@ if page == "Crime Zones (K-Means)":
 # 2️⃣ Geographic Crime Heatmap
 # --------------------------------------------------
 elif page == "Geographic Crime Heatmap":
-    st.subheader("Geographic Crime Heatmap")
-elif page == "Geographic Crime Heatmap":
+
     st.subheader("Geographic Crime Heatmap (DBSCAN)")
 
     df_geo = df_clean.dropna(subset=["Latitude", "Longitude"]).copy()
