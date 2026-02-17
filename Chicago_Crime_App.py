@@ -435,14 +435,14 @@ elif page == "Dimensionality Reduction (PCA & t-SNE)":
     
         perplexity = st.slider("Perplexity", 5, 50, 30)
     
-       tsne = TSNE(
+        tsne = TSNE(
             n_components=2,
             perplexity=min(perplexity, sample_size // 3),
             learning_rate="auto",
             max_iter=500,     # reduce from 1000
             random_state=42,
             init='pca'
-        )
+             )
     
     
         X_tsne = tsne.fit_transform(X_sample)
