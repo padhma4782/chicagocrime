@@ -170,7 +170,7 @@ elif page == "Geographic Crime Heatmap":
     df_geo = df_geo.sample(min(5000, len(df_geo)), random_state=42)
     coords = df_geo[["Latitude", "Longitude"]].values
 
-    dbscan = DBSCAN(eps=0.0025, min_samples=100)  # approx 250m in lat/lon
+    dbscan = DBSCAN(eps=0.0035, min_samples=30)
     labels = dbscan.fit_predict(coords)
 
     df_geo["dbscan_zone"] = labels
