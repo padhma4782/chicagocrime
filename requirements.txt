@@ -2,7 +2,10 @@ streamlit
 pandas
 numpy
 scikit-learn
+plotly
+geopandas
+shapely
 matplotlib
 folium
 streamlit-folium
-joblib
+seaborn
