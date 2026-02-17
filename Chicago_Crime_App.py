@@ -157,36 +157,122 @@ if page == "Crime Zones (K-Means)":
     st.pyplot(fig)
 
 
-    
-
 # --------------------------------------------------
-# 2️⃣ Geographic Crime Heatmap
+# 2️⃣ Geographic Crime Heatmap (Production Version)
 # --------------------------------------------------
 elif page == "Geographic Crime Heatmap":
 
-    st.subheader("Geographic Crime Heatmap (DBSCAN)")
+    st.subheader("🌍 Geographic Crime Hotspot Detection (DBSCAN)")
 
+    # -----------------------------
+    # Prepare Data
+    # -----------------------------
     df_geo = df_clean.dropna(subset=["Latitude", "Longitude"]).copy()
-    df_geo = df_geo.sample(min(5000, len(df_geo)), random_state=42)
-    coords = df_geo[["Latitude", "Longitude"]].values
 
-    dbscan = DBSCAN(eps=0.0035, min_samples=30)
+    if len(df_geo) < 100:
+        st.warning("Not enough geographic data points for clustering.")
+        st.stop()
+
+    # Convert to radians for haversine metric
+    coords = np.radians(df_geo[["Latitude", "Longitude"]].values)
+
+    # -----------------------------
+    # User Controls
+    # -----------------------------
+    col1, col2 = st.columns(2)
+
+    with col1:
+        eps_meters = st.slider(
+            "Neighborhood Radius (meters)",
+            min_value=100,
+            max_value=1000,
+            value=300,
+            step=50
+        )
+
+    with col2:
+        min_samples = st.slider(
+            "Minimum Samples per Cluster",
+            min_value=10,
+            max_value=200,
+            value=50,
+            step=10
+        )
+
+    # Convert meters → radians
+    earth_radius = 6371000  # meters
+    eps_radians = eps_meters / earth_radius
+
+    # -----------------------------
+    # Run DBSCAN
+    # -----------------------------
+    dbscan = DBSCAN(
+        eps=eps_radians,
+        min_samples=min_samples,
+        metric="haversine"
+    )
+
     labels = dbscan.fit_predict(coords)
+    df_geo["cluster"] = labels
 
-    df_geo["dbscan_zone"] = labels
+    # -----------------------------
+    # Cluster Summary
+    # -----------------------------
+    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+    n_noise = (labels == -1).sum()
 
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Total Points", len(df_geo))
+    col2.metric("Detected Clusters", n_clusters)
+    col3.metric("Noise Points", n_noise)
+
+    if n_clusters == 0:
+        st.warning("No clusters detected. Try increasing radius or lowering min_samples.")
+        st.stop()
+
+    # -----------------------------
+    # Interactive Cluster Filter
+    # -----------------------------
+    cluster_options = sorted([c for c in set(labels) if c != -1])
+
+    selected_clusters = st.multiselect(
+        "Select Clusters to Display",
+        options=cluster_options,
+        default=cluster_options
+    )
+
+    df_plot = df_geo[df_geo["cluster"].isin(selected_clusters)]
+
+    # -----------------------------
+    # Map Visualization
+    # -----------------------------
     fig = px.scatter_mapbox(
-        df_geo[df_geo["dbscan_zone"] != -1],
+        df_plot,
         lat="Latitude",
         lon="Longitude",
-        color="dbscan_zone",
+        color="cluster",
         zoom=10,
-        height=600,
-        mapbox_style="carto-positron"
+        height=650,
+        mapbox_style="carto-positron",
+        title="Chicago Crime Hotspot Clusters"
     )
 
     st.plotly_chart(fig, width="stretch")
 
+    # -----------------------------
+    # Cluster Size Table
+    # -----------------------------
+    cluster_sizes = (
+        df_geo[df_geo["cluster"] != -1]
+        .groupby("cluster")
+        .size()
+        .reset_index(name="Number of Crimes")
+        .sort_values("Number of Crimes", ascending=False)
+    )
+
+    st.markdown("### 📊 Cluster Size Summary")
+    st.dataframe(cluster_sizes, use_container_width=True)
 
 # --------------------------------------------------
 # 3️⃣ Temporal Pattern Analysis
