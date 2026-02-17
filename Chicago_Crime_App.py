@@ -166,14 +166,17 @@ elif page == "Geographic Crime Heatmap":
     st.subheader("Geographic Crime Heatmap")
 
     # Create GeoDataFrame
+    df_geo = df_clean.dropna(subset=["Latitude", "Longitude"]).copy()
+    
     gdf = gpd.GeoDataFrame(
-        df,
+        df_geo,
         geometry=gpd.points_from_xy(
-            df.Longitude,
-            df.Latitude
+            df_geo.Longitude,
+            df_geo.Latitude
         ),
         crs="EPSG:4326"
     ).to_crs(epsg=32616)
+
 
     # Extract projected coordinates
     X = np.column_stack([gdf.geometry.x, gdf.geometry.y])
@@ -181,8 +184,7 @@ elif page == "Geographic Crime Heatmap":
     # Run DBSCAN
     dbscan = DBSCAN(
         eps=250,        # meters
-        min_samples=100,
-        n_jobs=-1
+        min_samples=100
     )
 
     labels = dbscan.fit_predict(X)
@@ -442,7 +444,10 @@ elif page == "Dimensionality Reduction (PCA & t-SNE)":
 
     sample_size = st.slider("Sample Size for t-SNE", 5000, 30000, 15000)
 
+    #idx = np.random.choice(len(X_scaled), sample_size, replace=False)
+    sample_size = min(sample_size, len(X_scaled))
     idx = np.random.choice(len(X_scaled), sample_size, replace=False)
+
     X_sample = X_scaled[idx]
     df_sample = df_pca.iloc[idx].copy()
 
