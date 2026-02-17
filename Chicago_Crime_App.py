@@ -164,54 +164,30 @@ if page == "Crime Zones (K-Means)":
 # --------------------------------------------------
 elif page == "Geographic Crime Heatmap":
     st.subheader("Geographic Crime Heatmap")
+elif page == "Geographic Crime Heatmap":
+    st.subheader("Geographic Crime Heatmap (DBSCAN)")
 
-    # Create GeoDataFrame
     df_geo = df_clean.dropna(subset=["Latitude", "Longitude"]).copy()
-    
-    gdf = gpd.GeoDataFrame(
-        df_geo,
-        geometry=gpd.points_from_xy(
-            df_geo.Longitude,
-            df_geo.Latitude
-        ),
-        crs="EPSG:4326"
-    ).to_crs(epsg=32616)
 
+    coords = df_geo[["Latitude", "Longitude"]].values
 
-    # Extract projected coordinates
-    X = np.column_stack([gdf.geometry.x, gdf.geometry.y])
+    dbscan = DBSCAN(eps=0.0025, min_samples=100)  # approx 250m in lat/lon
+    labels = dbscan.fit_predict(coords)
 
-    # Run DBSCAN
-    dbscan = DBSCAN(
-        eps=250,        # meters
-        min_samples=100
+    df_geo["dbscan_zone"] = labels
+
+    fig = px.scatter_mapbox(
+        df_geo[df_geo["dbscan_zone"] != -1],
+        lat="Latitude",
+        lon="Longitude",
+        color="dbscan_zone",
+        zoom=10,
+        height=600,
+        mapbox_style="carto-positron"
     )
 
-    labels = dbscan.fit_predict(X)
-    gdf["dbscan_zone"] = labels
+    st.plotly_chart(fig, width="stretch")
 
-    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-    n_noise = (labels == -1).sum()
-
-    st.write(f"Number of clusters: {n_clusters}")
-    st.write(f"Noise points: {n_noise}")
-
-    # Plot
-    fig, ax = plt.subplots(figsize=(9, 9))
-
-    gdf[gdf["dbscan_zone"] != -1].plot(
-        ax=ax,
-        column="dbscan_zone",
-        cmap="tab10",
-        markersize=3,
-        alpha=0.6,
-        legend=True
-    )
-
-    ax.set_title("DBSCAN Crime Hotspot Clusters (eps = 250m)")
-    ax.set_axis_off()
-
-    st.pyplot(fig)
 
 # --------------------------------------------------
 # 3️⃣ Temporal Pattern Analysis
