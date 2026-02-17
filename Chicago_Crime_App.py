@@ -1,34 +1,16 @@
-
-# app.py
-# Production-ready Multi-page Streamlit App for PatrolIQ
+# Chicago Crime Analytics - Production Cloud Safe Version
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
 import plotly.express as px
+from sklearn.cluster import DBSCAN, KMeans
+from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-import geopandas as gpd
-from shapely.geometry import Point
-import matplotlib.pyplot as plt
-import folium
-from streamlit_folium import st_folium
-from sklearn.cluster import DBSCAN
-from sklearn.preprocessing import StandardScaler
 
-import warnings
-warnings.filterwarnings("ignore")
-
-
-# --------------------------------------------------
-# App Config
-# --------------------------------------------------
-st.set_page_config(
-    page_title="Chicago Crime Analytics",
-    layout="wide"
-)
-
+st.set_page_config(page_title="Chicago Crime Analytics", layout="wide")
 st.title("🚓 Chicago Crime Analytics Dashboard")
 
 # --------------------------------------------------
@@ -37,47 +19,20 @@ st.title("🚓 Chicago Crime Analytics Dashboard")
 @st.cache_data
 def load_data():
     df = pd.read_csv("PatrolIQ_cleaned.csv")
-    df.drop(columns=['Unnamed: 0'], inplace=True, errors='ignore')
+    df = df.drop(columns=['Unnamed: 0'], errors='ignore')
     return df
 
 df = load_data()
 
+# Chicago geographic bounds
 lat_min, lat_max = 41.6, 42.1
 lon_min, lon_max = -88.0, -87.5
 
-df_clean = df[
+df = df[
     df['Latitude'].between(lat_min, lat_max) &
     df['Longitude'].between(lon_min, lon_max)
 ].copy()
-#st.write(df_clean.columns)
-# --------------------------------------------------
-# Load KMeans Bundle (Model + Scaler + Features)
-# --------------------------------------------------
-@st.cache_resource
-def load_bundle():
-    return joblib.load("crime_zone_kmeans_bundle.pkl")
 
-bundle = load_bundle()
-kmeans = bundle["model"]
-scaler = bundle["scaler"]
-features = bundle.get('features', ['Latitude', 'Longitude'])
-
-# Predict clusters
-if "crime_zone" not in df_clean.columns:
-    X = df_clean[features].dropna()
-    X_scaled = scaler.transform(X)
-    df_clean.loc[X.index, "crime_zone"] = kmeans.predict(X_scaled)
-
-labels = df_clean['crime_zone'].values
-centroids_scaled = kmeans.cluster_centers_
-centroids = scaler.inverse_transform(centroids_scaled)
-
-centroids_df = pd.DataFrame(
-    centroids,
-    columns=features
-)[['Latitude', 'Longitude']]
-
-#st.write(df_clean.columns)
 # --------------------------------------------------
 # Sidebar Navigation
 # --------------------------------------------------
@@ -91,324 +46,180 @@ page = st.sidebar.radio(
     ]
 )
 
-# --------------------------------------------------
-# 1️⃣ Crime Zones
-# --------------------------------------------------
+# ==================================================
+# 1️⃣ Crime Zones (K-Means)
+# ==================================================
 if page == "Crime Zones (K-Means)":
+
     st.subheader("Crime Zones (K-Means Clustering)")
-    crime_gdf = gpd.GeoDataFrame(
-        df_clean,
-        geometry=gpd.points_from_xy(
-            df_clean['Longitude'],
-            df_clean['Latitude']
-        ),
-        crs="EPSG:4326"
-    )
 
-    # Centroid points
-    centroid_gdf = gpd.GeoDataFrame(
-        centroids_df,
-        geometry=gpd.points_from_xy(
-            centroids_df['Longitude'],
-            centroids_df['Latitude']
-        ),
-        crs="EPSG:4326"
-    )
+    coords = df[['Latitude', 'Longitude']].dropna()
 
-    #Project to meters
-    crime_gdf = crime_gdf.to_crs(epsg=32616)
-    centroid_gdf = centroid_gdf.to_crs(epsg=32616)
+    scaler = StandardScaler()
+    coords_scaled = scaler.fit_transform(coords)
 
-    #Create circular patrol zones
-    patrol_radius_m = 1000  # 1 km
-    patrol_zones = centroid_gdf.buffer(patrol_radius_m)
+    k = st.slider("Number of clusters", 4, 12, 8)
 
+    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(coords_scaled)
 
-    fig, ax = plt.subplots(figsize=(9, 9))
-
-    # Crime points
-    crime_gdf.plot(
-        ax=ax,
-        column='crime_zone',
-        cmap='tab10',
-        markersize=3,
-        alpha=0.3,
-        legend=False
-    )
-
-    # Patrol circles
-    gpd.GeoSeries(patrol_zones).plot(
-        ax=ax,
-        facecolor='none',
-        edgecolor='red',
-        linewidth=2
-    )
-
-    # Centroids
-    centroid_gdf.plot(
-        ax=ax,
-        color='black',
-        marker='X',
-        markersize=150
-    )
-
-    ax.set_title("Chicago Circular Crime Hotspot Patrol Zones (K-Means, k=8)")
-    ax.set_axis_off()
-    st.pyplot(fig)
-
-
-    
-
-# --------------------------------------------------
-# 2️⃣ Geographic Crime Heatmap
-# --------------------------------------------------
-elif page == "Geographic Crime Heatmap":
-
-    st.subheader("Geographic Crime Heatmap (DBSCAN)")
-
-    df_geo = df_clean.dropna(subset=["Latitude", "Longitude"]).copy()
-
-    coords = df_geo[["Latitude", "Longitude"]].values
-
-    dbscan = DBSCAN(eps=0.0025, min_samples=100)  # approx 250m in lat/lon
-    labels = dbscan.fit_predict(coords)
-
-    df_geo["dbscan_zone"] = labels
+    df_k = coords.copy()
+    df_k["zone"] = labels
 
     fig = px.scatter_mapbox(
-        df_geo[df_geo["dbscan_zone"] != -1],
+        df_k,
         lat="Latitude",
         lon="Longitude",
-        color="dbscan_zone",
+        color="zone",
         zoom=10,
         height=600,
         mapbox_style="carto-positron"
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
+# ==================================================
+# 2️⃣ Geographic Crime Heatmap (DBSCAN)
+# ==================================================
+elif page == "Geographic Crime Heatmap":
 
-# --------------------------------------------------
-# 3️⃣ Temporal Pattern Analysis
-# --------------------------------------------------
-elif page == "Temporal Pattern Analysis":
-    st.subheader("Temporal Pattern Analysis")
-    temporal_features = ['Hour', 'Month', 'Is_Weekend']
+    st.subheader("Geographic Crime Hotspots (DBSCAN)")
 
-    # -----------------------------
-    # 1️⃣ Time-based Clustering
-    # -----------------------------
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.cluster import KMeans
+    df_geo = df[['Latitude', 'Longitude']].dropna()
 
-    X_time = df_clean[temporal_features].dropna()
+    # Limit rows for Cloud safety
+    df_geo = df_geo.sample(min(5000, len(df_geo)), random_state=42)
 
-    scaler_time = StandardScaler()
-    X_time_scaled = scaler_time.fit_transform(X_time)
+    coords = df_geo.values
 
-    k = st.slider("Select number of time clusters", 3, 6, 4)
+    dbscan = DBSCAN(eps=0.0025, min_samples=50)
+    labels = dbscan.fit_predict(coords)
 
-    kmeans_time = KMeans(
-        n_clusters=k,
-        random_state=42,
-        n_init=20
+    df_geo["cluster"] = labels
+
+    fig = px.scatter_mapbox(
+        df_geo[df_geo["cluster"] != -1],
+        lat="Latitude",
+        lon="Longitude",
+        color="cluster",
+        zoom=10,
+        height=600,
+        mapbox_style="carto-positron"
     )
 
-    df_clean.loc[X_time.index, 'time_cluster'] = kmeans_time.fit_predict(X_time_scaled)
+    st.plotly_chart(fig, use_container_width=True)
+
+# ==================================================
+# 3️⃣ Temporal Pattern Analysis
+# ==================================================
+elif page == "Temporal Pattern Analysis":
+
+    st.subheader("Temporal Pattern Analysis")
+
+    temporal_features = ['Hour', 'Month', 'Is_Weekend']
+    df_temp = df[temporal_features].dropna()
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(df_temp)
+
+    k = st.slider("Time Clusters", 3, 6, 4)
+
+    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+    df_temp["time_cluster"] = kmeans.fit_predict(X_scaled)
 
     st.markdown("### Time Cluster Summary")
+    st.dataframe(df_temp.groupby("time_cluster").mean())
 
-    time_cluster_summary = (
-        df_clean
-        .groupby('time_cluster')[temporal_features]
-        .mean()
-        .round(2)
-    )
+    # Violent Crime Peak
+    if 'primary_Homicide' in df.columns:
+        violent_cols = [col for col in df.columns if "primary_" in col]
+        df["violent_crime"] = df[violent_cols].sum(axis=1)
 
-    st.dataframe(time_cluster_summary)
+        hourly = df.groupby("Hour")["violent_crime"].sum()
 
-    # -----------------------------
-    # 2️⃣ Violent Crime Analysis
-    # -----------------------------
-    st.markdown("### 🔥 Violent Crime Peak Hours")
+        fig = px.bar(
+            hourly,
+            title="Crime Intensity by Hour"
+        )
 
-    violent_cols = [
-        'primary_Homicide',
-        'primary_Battery',
-        'primary_Assault',
-        'primary_Robbery',
-        'primary_Sex Offense'
-    ]
+        st.plotly_chart(fig, use_container_width=True)
 
-    df_clean['violent_crime'] = df_clean[violent_cols].sum(axis=1)
-
-    hourly_violent = (
-        df_clean
-        .groupby('Hour')['violent_crime']
-        .sum()
-        .sort_values(ascending=False)
-    )
-
-    st.write("Top 5 Violent Crime Hours:")
-    st.write(hourly_violent.head(5))
-
-    # Bar chart
-    fig_hour = px.bar(
-        hourly_violent.sort_index(),
-        title="Violent Crimes by Hour",
-        labels={'value': 'Total Violent Crimes'}
-    )
-
-    st.plotly_chart(fig_hour, width="stretch")
-
-    # -----------------------------
-    # 3️⃣ Weekend vs Weekday
-    # -----------------------------
-    st.markdown("### 📅 Weekend vs Weekday Crime Comparison")
-
-    weekend_comparison = (
-        df_clean
-        .groupby('Is_Weekend')
-        .size()
-        .rename({0: 'Weekday', 1: 'Weekend'})
-    )
-
-    fig_weekend = px.pie(
-        values=weekend_comparison.values,
-        names=weekend_comparison.index,
-        title="Weekend vs Weekday Crime Distribution"
-    )
-
-    st.plotly_chart(fig_weekend, width="stretch")
-
-    # -----------------------------
-    # 4️⃣ Hour vs Day Heatmap
-    # -----------------------------
-    st.markdown("### 🌡 Crime Frequency Heatmap (Day vs Hour)")
-
-    hourly_heatmap = (
-        df_clean
-        .groupby(['Day_enc', 'Hour'])
-        .size()
-        .unstack(fill_value=0)
-    )
-
-    fig_heatmap = px.imshow(
-        hourly_heatmap,
-        color_continuous_scale='Reds',
-        aspect="auto",
-        labels=dict(x="Hour", y="Day of Week", color="Crime Count")
-    )
-
-    st.plotly_chart(fig_heatmap, width="stretch")
-# --------------------------------------------------
+# ==================================================
 # 4️⃣ Dimensionality Reduction
-# --------------------------------------------------
+# ==================================================
 elif page == "Dimensionality Reduction (PCA & t-SNE)":
-    st.subheader("Dimensionality Reduction (PCA & t-SNE)")
 
-    # -----------------------------
-    # Filter Chicago bounds
-    # -----------------------------
-    df_pca = df[
-        df['Latitude'].between(lat_min, lat_max) &
-        df['Longitude'].between(lon_min, lon_max)
-    ].copy()
+    st.subheader("Dimensionality Reduction")
 
-    # -----------------------------
-    # Feature Engineering
-    # -----------------------------
-    violent_cols = [
-        'primary_Homicide',
-        'primary_Battery',
-        'primary_Assault',
-        'primary_Sex Offense',
-        'primary_Criminal Sexual Assault',
-        'primary_Kidnapping',
-        'primary_Stalking',
-        'primary_Intimidation'
-    ]
-
-    nonviolent_cols = [
-        'primary_Robbery',
-        'primary_Theft',
-        'primary_Burglary',
-        'primary_Motor Vehicle Theft',
-        'primary_Criminal Damage',
-        'primary_Criminal Trespass',
-        'primary_Deceptive Practice',
-        'primary_Narcotics',
-        'primary_Other Narcotic Violation',
-        'primary_Gambling',
-        'primary_Prostitution',
-        'primary_Public Peace Violation',
-        'primary_Liquor Law Violation',
-        'primary_Weapons Violation'
-    ]
-
-    df_pca['violent_crime'] = df_pca[violent_cols].sum(axis=1)
-    df_pca['nonviolent_crime'] = df_pca[nonviolent_cols].sum(axis=1)
-
-    pca_features = [
+    features = [
         'Latitude',
         'Longitude',
         'Hour',
         'Month',
-        'Is_Weekend',
-        'violent_crime',
-        'nonviolent_crime'
+        'Is_Weekend'
     ]
 
-    X = df_pca[pca_features].dropna()
+    df_pca = df[features].dropna()
 
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    X_scaled = scaler.fit_transform(df_pca)
 
-    # =============================
-    # 1️⃣ PCA
-    # =============================
-    st.markdown("### Principal Component Analysis (PCA)")
+    # ---------------- PCA ----------------
+    st.markdown("### PCA")
 
     pca = PCA()
-    X_pca = pca.fit_transform(X_scaled)
+    pca.fit(X_scaled)
 
-    cumulative_variance = np.cumsum(pca.explained_variance_ratio_)
+    cumulative = np.cumsum(pca.explained_variance_ratio_)
 
-    # Scree Plot
-    fig_scree = px.line(
-        x=range(1, len(cumulative_variance) + 1),
-        y=cumulative_variance,
+    fig = px.line(
+        x=range(1, len(cumulative)+1),
+        y=cumulative,
         markers=True,
-        labels={"x": "Number of Components", "y": "Cumulative Explained Variance"},
-        title="PCA Scree Plot"
+        title="Cumulative Explained Variance"
     )
-    st.plotly_chart(fig_scree, width="stretch")
 
-    st.write(
-        f"Variance explained by first 3 components: "
-        f"{round(cumulative_variance[2] * 100, 2)}%"
-    )
+    st.plotly_chart(fig, use_container_width=True)
 
     # 2D PCA projection
     pca_2 = PCA(n_components=2)
-    X_pca_2d = pca_2.fit_transform(X_scaled)
+    X_2d = pca_2.fit_transform(X_scaled)
 
     pca_df = pd.DataFrame({
-        "PC1": X_pca_2d[:, 0],
-        "PC2": X_pca_2d[:, 1],
-        "Violent": df_pca.loc[X.index, 'violent_crime'] > 0,
-        "Hour": df_pca.loc[X.index, 'Hour']
+        "PC1": X_2d[:,0],
+        "PC2": X_2d[:,1]
     })
 
-    fig_pca = px.scatter(
-        pca_df,
+    fig2 = px.scatter(
+        pca_df.sample(min(5000, len(pca_df))),
         x="PC1",
         y="PC2",
-        color="Violent",
         opacity=0.5,
-        title="2D PCA Projection",
-        hover_data=["Hour"]
+        title="2D PCA Projection"
     )
 
-    st.plotly_chart(fig_pca, width="stretch")
-    
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # ---------------- t-SNE (Cloud Safe) ----------------
+    st.markdown("### t-SNE (Sampled for Performance)")
+
+    sample = pca_df.sample(min(3000, len(pca_df)), random_state=42)
+
+    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
+
+    X_tsne = tsne.fit_transform(sample.values)
+
+    tsne_df = pd.DataFrame({
+        "TSNE1": X_tsne[:,0],
+        "TSNE2": X_tsne[:,1]
+    })
+
+    fig3 = px.scatter(
+        tsne_df,
+        x="TSNE1",
+        y="TSNE2",
+        opacity=0.6,
+        title="t-SNE Projection"
+    )
+
+    st.plotly_chart(fig3, use_container_width=True)
